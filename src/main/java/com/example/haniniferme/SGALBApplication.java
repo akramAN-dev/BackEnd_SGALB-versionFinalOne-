@@ -6,10 +6,10 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 @SpringBootApplication
-public class HaniniFermeApplication {
+public class SGALBApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(HaniniFermeApplication.class, args);
+        SpringApplication.run(SGALBApplication.class, args);
     }
     @Bean
     public BCryptPasswordEncoder passwordEncoderCoach() {
