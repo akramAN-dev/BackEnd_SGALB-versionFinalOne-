@@ -1,5 +1,8 @@
 package com.example.sgalb.Security;
 
+import com.example.sgalb.Repositories.UtilisateurRepository;
+import com.example.sgalb.Services.GoogleAuthentication.GoogleAuthenticationServiceInterface;
+import com.example.sgalb.Services.MicrosoftAuthentication.MicrosoftAuthenticationServiceInterface;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
@@ -31,33 +34,47 @@ import java.util.List;
 @EnableWebSecurity
 public class SecurityConfig {
 
+    private static final String FRONTEND_URL = "http://localhost:5173";
+    private static final String SECRET_KEY = "9faa372517ac1d389758d3750fc87acf00f542277f26fec1ce4593e93f64e644";
+
     @Autowired
     @Lazy
     private CustomUserDetailsService userDetailsService;
 
-    private static final String FRONTEND_URL = "http://localhost:5173";
-    private static final String SECRET_KEY = "9faa372517ac1d389758d3750fc87acf00f542277f26fec1ce4593e93f64e644";
+    @Autowired
+    private UtilisateurRepository utilisateurRepository;
+
+    @Autowired
+    private GoogleAuthenticationServiceInterface googleService;
+
+    @Autowired
+    private MicrosoftAuthenticationServiceInterface microsoftService;
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity httpSecurity) throws Exception {
-        return httpSecurity
+    public OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler(JwtEncoder jwtEncoder) {
+        return new OAuth2LoginSuccessHandler(jwtEncoder, utilisateurRepository, googleService, microsoftService);
+    }
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http, OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler) throws Exception {
+        return http
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/auth/login/**", "/api/v1/utilisateur/addUtilisateur").permitAll()
                         .anyRequest().authenticated()
                 )
-                .oauth2Login(oauth2 -> oauth2.defaultSuccessUrl(FRONTEND_URL + "/auth/google/callback", true))
-                .oauth2ResourceServer(oa -> oa.jwt(Customizer.withDefaults()))
-                //.formLogin(form -> form.defaultSuccessUrl("/", true))
-                .logout(logout -> logout
-                        .logoutUrl("/logout")  // URL pour la déconnexion
-                        .logoutSuccessUrl(FRONTEND_URL + "/")  // Redirection après la déconnexion (par exemple vers la page d'accueil)
-                        .invalidateHttpSession(true)  // Invalide la session après la déconnexion
-                        .clearAuthentication(true)  // Efface les informations d'authentification
-                        .deleteCookies("JSESSIONID")  // Supprime les cookies de session
+                .oauth2Login(oauth2 -> oauth2
+                        .successHandler(oAuth2LoginSuccessHandler) // Redirection personnalisée via handler
                 )
                 .oauth2ResourceServer(oa -> oa.jwt(Customizer.withDefaults()))
+                .logout(logout -> logout
+                        .logoutUrl("/logout")
+                        .logoutSuccessUrl(FRONTEND_URL + "/")
+                        .invalidateHttpSession(true)
+                        .clearAuthentication(true)
+                        .deleteCookies("JSESSIONID")
+                )
                 .build();
     }
 
