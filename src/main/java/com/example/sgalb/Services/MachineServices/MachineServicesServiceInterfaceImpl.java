@@ -17,37 +17,42 @@ public class MachineServicesServiceInterfaceImpl implements MachineServicesServi
     SshServiceInterfaceImpl sshService;
     ServeurRepository serveurRepository;
 
-    @Override
     public List<ServiceInfoDTO> listDesServices(Long idUtilisateur) {
-        Serveur serveur = serveurRepository.findByUtilisateurIdUtilisateur(idUtilisateur);
-        String user = serveur.getUser();
-        String host = serveur.getHost();
-        String password = serveur.getPassword();
+        // Récupérer la liste des serveurs connectés de l'utilisateur
+        List<Serveur> serveurs = serveurRepository.findAllByUtilisateurIdUtilisateurAndConnectedTrue(idUtilisateur);
 
         List<ServiceInfoDTO> services = new ArrayList<>();
 
-        String result = sshService.executeCommand(
-                host, user, password,
-                "systemctl list-units --type=service --all --no-legend --no-pager | grep '.service' | awk '{print $1, $4}'"
-        );
+        // Pour chaque serveur connecté, exécuter la commande SSH et récupérer les services
+        for (Serveur serveur : serveurs) {
+            String user = serveur.getUser();
+            String host = serveur.getHost();
+            String password = serveur.getPassword();
 
-        if (result != null && !result.isEmpty()) {
-            for (String line : result.split("\n")) {
-                String[] parts = line.trim().split("\\s+");
-                if (parts.length == 2 && parts[0].endsWith(".service")) {
-                    String fullName = parts[0];
-                    String name = fullName.replace(".service", ""); // ← Retirer le suffixe
-                    String rawStatus = parts[1];
-                    String status = rawStatus.equalsIgnoreCase("running") ? "running" : "stopped";
-                    String type = getServiceType(name); // Utilise le nom sans .service
+            String result = sshService.executeCommand(
+                    host, user, password,
+                    "systemctl list-units --type=service --all --no-legend --no-pager | grep '.service' | awk '{print $1, $4}'"
+            );
 
-                    services.add(new ServiceInfoDTO(name, status, type));
+            if (result != null && !result.isEmpty()) {
+                for (String line : result.split("\n")) {
+                    String[] parts = line.trim().split("\\s+");
+                    if (parts.length == 2 && parts[0].endsWith(".service")) {
+                        String fullName = parts[0];
+                        String name = fullName.replace(".service", ""); // Retirer le suffixe
+                        String rawStatus = parts[1];
+                        String status = rawStatus.equalsIgnoreCase("running") ? "running" : "stopped";
+                        String type = getServiceType(name); // Utilise le nom sans .service
+
+                        services.add(new ServiceInfoDTO(name, status, type));
+                    }
                 }
             }
         }
 
         return services;
     }
+
 
 
 
@@ -61,38 +66,67 @@ public class MachineServicesServiceInterfaceImpl implements MachineServicesServi
 
 
     @Override
-    public String status(String serviceName,Long idUtilisateur) {
-        Serveur serveur = serveurRepository.findByUtilisateurIdUtilisateur(idUtilisateur);
-        String user=serveur.getUser();
-        String host=serveur.getHost();
-        String password=serveur.getPassword();
-        return sshService.executeCommand(host, user, password, "sudo systemctl status " + serviceName);
+    public String status(String serviceName, Long idUtilisateur) {
+        List<Serveur> serveurs = serveurRepository.findAllByUtilisateurIdUtilisateurAndConnectedTrue(idUtilisateur);
+        StringBuilder combinedResult = new StringBuilder();
+
+        for (Serveur serveur : serveurs) {
+            String user = serveur.getUser();
+            String host = serveur.getHost();
+            String password = serveur.getPassword();
+
+            String result = sshService.executeCommand(host, user, password, "sudo systemctl status " + serviceName);
+            combinedResult.append("Serveur: ").append(host).append("\n").append(result).append("\n\n");
+        }
+        return combinedResult.toString();
     }
 
     @Override
-    public String start(String serviceName,Long idUtilisateur) {
-        Serveur serveur = serveurRepository.findByUtilisateurIdUtilisateur(idUtilisateur);
-        String user=serveur.getUser();
-        String host=serveur.getHost();
-        String password=serveur.getPassword();
-        return sshService.executeCommand(host, user, password, "sudo systemctl start " + serviceName);
+    public String start(String serviceName, Long idUtilisateur) {
+        List<Serveur> serveurs = serveurRepository.findAllByUtilisateurIdUtilisateurAndConnectedTrue(idUtilisateur);
+        StringBuilder combinedResult = new StringBuilder();
+
+        for (Serveur serveur : serveurs) {
+            String user = serveur.getUser();
+            String host = serveur.getHost();
+            String password = serveur.getPassword();
+
+            String result = sshService.executeCommand(host, user, password, "sudo systemctl start " + serviceName);
+            combinedResult.append("Serveur: ").append(host).append(" - ").append(result).append("\n");
+        }
+        return combinedResult.toString();
     }
 
     @Override
-    public String stop(String serviceName,Long idUtilisateur) {
-        Serveur serveur = serveurRepository.findByUtilisateurIdUtilisateur(idUtilisateur);
-        String user=serveur.getUser();
-        String host=serveur.getHost();
-        String password=serveur.getPassword();
-        return sshService.executeCommand(host, user, password, "sudo systemctl stop " + serviceName);
+    public String stop(String serviceName, Long idUtilisateur) {
+        List<Serveur> serveurs = serveurRepository.findAllByUtilisateurIdUtilisateurAndConnectedTrue(idUtilisateur);
+        StringBuilder combinedResult = new StringBuilder();
+
+        for (Serveur serveur : serveurs) {
+            String user = serveur.getUser();
+            String host = serveur.getHost();
+            String password = serveur.getPassword();
+
+            String result = sshService.executeCommand(host, user, password, "sudo systemctl stop " + serviceName);
+            combinedResult.append("Serveur: ").append(host).append(" - ").append(result).append("\n");
+        }
+        return combinedResult.toString();
     }
 
     @Override
-    public String restart(String serviceName,Long idUtilisateur) {
-        Serveur serveur = serveurRepository.findByUtilisateurIdUtilisateur(idUtilisateur);
-        String user=serveur.getUser();
-        String host=serveur.getHost();
-        String password=serveur.getPassword();
-        return sshService.executeCommand(host, user, password, "sudo systemctl restart " + serviceName);
+    public String restart(String serviceName, Long idUtilisateur) {
+        List<Serveur> serveurs = serveurRepository.findAllByUtilisateurIdUtilisateurAndConnectedTrue(idUtilisateur);
+        StringBuilder combinedResult = new StringBuilder();
+
+        for (Serveur serveur : serveurs) {
+            String user = serveur.getUser();
+            String host = serveur.getHost();
+            String password = serveur.getPassword();
+
+            String result = sshService.executeCommand(host, user, password, "sudo systemctl restart " + serviceName);
+            combinedResult.append("Serveur: ").append(host).append(" - ").append(result).append("\n");
+        }
+        return combinedResult.toString();
     }
+
 }

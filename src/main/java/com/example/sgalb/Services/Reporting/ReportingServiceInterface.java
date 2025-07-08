@@ -9,7 +9,7 @@ import java.util.List;
 public interface ReportingServiceInterface {
 
     // here a function to select all elements of the user and like
-    byte[] genererRapportGlobal(Long idUtilisateur, Reporting reporting) throws IOException;
+byte[] genererRapportGlobal(Long idUtilisateur, Reporting reporting) throws IOException;
     Long getNumberOfRepports(Long idUser);
     List<Reporting> selectRapportsForUser(Long idUtilisateur);
 

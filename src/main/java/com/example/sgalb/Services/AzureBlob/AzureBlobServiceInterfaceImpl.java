@@ -609,7 +609,61 @@ public class AzureBlobServiceInterfaceImpl implements AzureBlobServiceInterface 
         return container;
     }
 
-    public String upload(String fullRelativePath, Long idUtilisateur) throws Exception {
+//    public String upload(String fullRelativePath, Long idUtilisateur) throws Exception {
+//        Serveur serveur = getServeurConnecte(idUtilisateur);
+//        String remoteFilePath = "/home/" + serveur.getUser() + "/" + fullRelativePath;
+//        String sftpPassword = EncryptionUtils.decrypt(serveur.getPassword());
+//        JSch jsch = new JSch();
+//        Session session = jsch.getSession(serveur.getUser(), serveur.getHost(), 22);
+//        session.setPassword(sftpPassword);
+//        session.setConfig("StrictHostKeyChecking", "no");
+//        session.connect();
+//        System.out.println("✅ Chemin complet sur la VM : " + remoteFilePath);
+//        Channel channel = session.openChannel("sftp");
+//        channel.connect();
+//        ChannelSftp sftpChannel = (ChannelSftp) channel;
+//
+//        try {
+//            InputStream inputStream = sftpChannel.get(remoteFilePath);
+//            long fileSize = sftpChannel.lstat(remoteFilePath).getSize();
+//
+//            String fileName = Paths.get(fullRelativePath).getFileName().toString();
+//
+//            BlobContainerClient containerClient = initClientFromDB(idUtilisateur);
+//            BlobClient blobClient = containerClient.getBlobClient(fileName);
+//            blobClient.upload(inputStream, fileSize, true);
+//
+//            BlobProperties props = blobClient.getProperties();
+//            Date dateArchivage = Date.from(props.getLastModified().toInstant());
+//            long dureeSecondes = (new Date().getTime() - dateArchivage.getTime()) / 1000;
+//            long tailleOctets = props.getBlobSize();
+//
+//            Archivage archivage = new Archivage();
+//            archivage.setDate(dateArchivage);
+//            archivage.setNomArchive(fileName);
+//            archivage.setStatuts(Status.Terminé);
+//            archivage.setTaille(tailleOctets);
+//            archivage.setDuree(dureeSecondes);
+//            archivage.setServeurs(serveur.getHost());
+//
+//            Utilisateur utilisateur = utilisateurRepository.findById(idUtilisateur)
+//                    .orElseThrow(() -> new RuntimeException("Utilisateur non trouvé"));
+//            archivage.setUtilisateur(utilisateur);
+//
+//            archiveRepository.save(archivage);
+//
+//            sftpChannel.rm(remoteFilePath);
+//
+//            inputStream.close();
+//            return blobClient.getBlobUrl();
+//        } catch (Exception e) {
+//            throw new RuntimeException("Erreur durant l'upload ou la suppression du fichier : " + e.getMessage(), e);
+//        } finally {
+//            if (sftpChannel.isConnected()) sftpChannel.exit();
+//            if (session.isConnected()) session.disconnect();
+//        }
+//    }
+public String upload(String fullRelativePath, Long idUtilisateur) throws Exception {
         Serveur serveur = getServeurConnecte(idUtilisateur);
         String remoteFilePath = "/home/" + serveur.getUser() + "/" + fullRelativePath;
         String sftpPassword = EncryptionUtils.decrypt(serveur.getPassword());

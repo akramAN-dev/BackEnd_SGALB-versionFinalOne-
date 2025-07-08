@@ -106,11 +106,14 @@ public class PlanificationController {
                         .body("❌ Utilisateur introuvable avec l'ID : " + idUtilisateur);
             }
 
-            Serveur serveur = serveurRepository.findByUtilisateurIdUtilisateur(idUtilisateur);
-            if (serveur == null) {
+            // ✅ Récupérer le(s) serveur(s) connectés
+            List<Serveur> serveurs = serveurRepository.findAllByUtilisateurIdUtilisateurAndConnectedTrue(idUtilisateur);
+            if (serveurs == null || serveurs.isEmpty()) {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                        .body("❌ Serveur non associé à cet utilisateur !");
+                        .body("❌ Aucun serveur connecté associé à cet utilisateur !");
             }
+
+            Serveur serveur = serveurs.get(0); // ✅ Utiliser le premier serveur connecté
 
             Planification planification = new Planification();
             planification.setNomFichier(nomFichier); // juste le nom relatif (ex : "fichier.txt" ou "logs/dossier/file.log")
@@ -137,6 +140,7 @@ public class PlanificationController {
                     .body("❌ Erreur lors de l'ajout de la planification : " + e.getMessage());
         }
     }
+
 
 
     //update Planification
