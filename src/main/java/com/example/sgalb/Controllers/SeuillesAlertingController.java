@@ -3,6 +3,7 @@ package com.example.sgalb.Controllers;
 import com.example.sgalb.Entities.Serveur;
 import com.example.sgalb.Entities.SeuillesAlerting;
 import com.example.sgalb.Services.SeuillesAlerting.SeuillesAlertingServiceInterface;
+import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -14,7 +15,7 @@ import org.springframework.web.bind.annotation.*;
 public class SeuillesAlertingController {
     SeuillesAlertingServiceInterface seuillesAlertingServiceInterface;
     @PostMapping("/addSeuillesAlerting")
-    public ResponseEntity<SeuillesAlerting> addSeuillesAlerting(@RequestParam Long idUtilisateur , @RequestBody SeuillesAlerting seuillesAlerting)
+    public ResponseEntity<SeuillesAlerting> addSeuillesAlerting(@RequestParam Long idUtilisateur , @Valid @RequestBody SeuillesAlerting seuillesAlerting)
     {
         SeuillesAlerting seuilleAlertsAdded = seuillesAlertingServiceInterface.addSeuilleAlertingOfMetriques(idUtilisateur , seuillesAlerting);
         return new ResponseEntity<>(seuilleAlertsAdded, HttpStatus.CREATED);

@@ -1,16 +1,16 @@
 package com.example.sgalb.Services.SshService;
 
-import com.azure.storage.blob.BlobClient;
-import com.azure.storage.blob.BlobContainerClient;
-import com.azure.storage.blob.models.BlobProperties;
 import com.example.sgalb.Entities.*;
 import com.example.sgalb.Enum.Gravité;
 import com.example.sgalb.Enum.Status;
 import com.example.sgalb.Repositories.*;
 import com.example.sgalb.Services.Mailing.EmailServiceInterface;
+import com.example.sgalb.Services.Serveur.ServeurServiceInterface;
+import com.example.sgalb.Utils.EncryptionUtils;
 import com.jcraft.jsch.*;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -29,17 +29,44 @@ public class SshServiceInterfaceImpl implements SshServiceInterface {
     EmailServiceInterface emailService;
     SeuillesAlertingRepository seuillesAlertingRepository;
     ServeurRepository serveurRepository;
+    ServeurServiceInterface serveurServiceInterface;
+
+    /**
+     * Récupère un Serveur avec mot de passe décrypté (pour l'utilisateur donné)
+     */
+//    private Serveur getServeurCredentials(Long idUtilisateur) {
+//        return serveurServiceInterface.getServeurWithDecryptedPassword(idUtilisateur);
+//    }
+    public List<Serveur> getServeurCredentials(Long idUtilisateur) {
+        return serveurServiceInterface.getServeursWithDecryptedPasswords(idUtilisateur);
+    }
+
+
+//    public String executeCommandByUserId(Long idUtilisateur, String command) {
+//        Serveur serveur = getServeurCredentials(idUtilisateur);
+//        if (serveur == null) {
+//            return "Serveur introuvable pour l'utilisateur " + idUtilisateur;
+//        }
+//        return executeCommand(serveur.getHost(), serveur.getUser(), serveur.getPassword(), command);
+//    }
+
+    public String executeCommandEncrypted(String host, String user, String encryptedPassword, String command) {
+        String decryptedPassword = EncryptionUtils.decrypt(encryptedPassword);
+        return executeCommand(host, user, decryptedPassword, command);
+    }
+
     @Override
     public String executeCommand(String host, String user, String password, String command) {
         StringBuilder output = new StringBuilder();
-
         try {
+            password = EncryptionUtils.decrypt(password); // toujours déchiffrer ici
+
             JSch jsch = new JSch();
             Session session = jsch.getSession(user, host, 22);
             session.setPassword(password);
 
             Properties config = new Properties();
-            config.put("StrictHostKeyChecking", "no"); // éviter la vérification de l’empreinte
+            config.put("StrictHostKeyChecking", "no");
             session.setConfig(config);
             session.connect();
 
@@ -65,47 +92,40 @@ public class SshServiceInterfaceImpl implements SshServiceInterface {
             session.disconnect();
 
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("Erreur exécution commande SSH", e);
             return "Erreur : " + e.getMessage();
         }
-
         return output.toString();
     }
 
-    // Récupérer les métriques CPU à distance via SSH
+
+    // Métriques CPU
     public double getCpuUsage(String host, String user, String password) {
-        String command = "top -bn1 | grep 'Cpu(s)' || top -bn1 | grep '%Cpu'"; // Support pour variantes
+        String command = "top -bn1 | grep 'Cpu(s)' || top -bn1 | grep '%Cpu'";
         String output = executeCommand(host, user, password, command);
 
         if (output == null || output.isEmpty()) {
-            System.err.println("Aucune sortie de la commande 'top'");
+            log.error("Aucune sortie pour la commande 'top'");
             return -1;
         }
 
         try {
-            // Recherche d'une valeur "id" (idle) dans la sortie
             String[] parts = output.split(",");
             for (String part : parts) {
-                part = part.trim(); // Supprimer les espaces
+                part = part.trim();
                 if (part.toLowerCase().contains("id")) {
-                    // Exemple : "88.2 id" -> extraire "88.2"
                     String idleStr = part.replaceAll("[^\\d.]", "");
                     double idle = Double.parseDouble(idleStr);
-                    double usage = 100.0 - idle;
-                    return Math.round(usage * 100.0) / 100.0; // Arrondi à 2 décimales
+                    return Math.round((100.0 - idle) * 100.0) / 100.0;
                 }
             }
         } catch (Exception e) {
-            System.err.println("Erreur lors de l’analyse de la sortie CPU : " + e.getMessage());
-            e.printStackTrace();
+            log.error("Erreur analyse CPU : ", e);
         }
-
-        return -1; // Erreur de parsing
+        return -1;
     }
 
-
-
-    // Récupérer les informations sur la RAM à distance via SSH
+    // Métriques RAM
     public double getRemoteRamUsage(String host, String user, String password) {
         String command = "free -b | grep Mem";
         String result = executeCommand(host, user, password, command);
@@ -114,21 +134,17 @@ public class SshServiceInterfaceImpl implements SshServiceInterface {
             if (scanner.hasNextLine()) {
                 String line = scanner.nextLine();
                 String[] parts = line.split("\\s+");
-
                 long total = Long.parseLong(parts[1]);
                 long used = Long.parseLong(parts[2]);
-
                 return (double) used / total * 100;
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("Erreur analyse RAM", e);
         }
-
-        return 0.0; // Valeur par défaut si échec
+        return 0.0;
     }
 
-
-    // Récupérer les statistiques réseau à distance via SSH
+    // Statistiques réseau
     @Override
     public Map<String, Long> getNetworkStats(String host, String user, String password) {
         String command = "cat /proc/net/dev | grep -v lo | tail -n +3";
@@ -140,37 +156,27 @@ public class SshServiceInterfaceImpl implements SshServiceInterface {
         try (Scanner scanner = new Scanner(result)) {
             while (scanner.hasNextLine()) {
                 String line = scanner.nextLine().trim();
-
                 if (!line.isEmpty()) {
-                    // Exemple ligne : eth0: 1234567 0 0 0 0 0 0 0 7654321 0 0 0 0 0 0 0
                     String[] parts = line.split(":");
                     if (parts.length < 2) continue;
-
                     String[] data = parts[1].trim().split("\\s+");
-
                     if (data.length >= 9) {
-                        long rx = Long.parseLong(data[0]); // Bytes reçus
-                        long tx = Long.parseLong(data[8]); // Bytes envoyés
-
-                        totalRx += rx;
-                        totalTx += tx;
+                        totalRx += Long.parseLong(data[0]);
+                        totalTx += Long.parseLong(data[8]);
                     }
                 }
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("Erreur analyse stats réseau", e);
         }
-
 
         Map<String, Long> stats = new HashMap<>();
         stats.put("bytesRecv", totalRx);
         stats.put("bytesSent", totalTx);
-
         return stats;
     }
 
-
-    // Récupérer l'état du stockage à distance via SSH
+    // Usage stockage disque
     @Override
     public double getRemoteStorageStatus(String host, String user, String password) {
         String command = "df -B1 / | tail -1";
@@ -178,32 +184,29 @@ public class SshServiceInterfaceImpl implements SshServiceInterface {
 
         try {
             String[] parts = result.trim().split("\\s+");
-            if (parts.length < 5) {
-                throw new IllegalArgumentException("Format de sortie inattendu: " + result);
-            }
-
+            if (parts.length < 5) throw new IllegalArgumentException("Sortie inattendue: " + result);
             long total = Long.parseLong(parts[1]);
             long used = Long.parseLong(parts[2]);
-
             if (total == 0) return 0.0;
-
             return ((double) used / total) * 100;
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("Erreur analyse stockage disque", e);
             return -1;
         }
     }
-    // cree une alert a partie de la metrique de CPU > 90% and RAM >90%
+
+    // Création d’alerte selon métriques
     @Override
     public String MetriqueStatusAlerting(String host, String user, String password, Long idUser,
                                          Long seuilleCPU, Long seuilleRam, Long seuilleDisque,
-                                         Long seuilleNetworkReceved, Long seuilleNetworkSent,Long seuilleMailing,String mailSender,String passwordSender) {
+                                         Long seuilleNetworkReceved, Long seuilleNetworkSent,
+                                         Long seuilleMailing, String mailSender, String passwordSender) {
 
         Notification notification = new Notification();
         Utilisateur utilisateur = utilisateurRepository.findByIdUtilisateur(idUser);
         if (utilisateur == null) return "Utilisateur non trouvé.";
 
-        // === ALERTE CPU ===
+        // ALERTE CPU
         double cpu = getCpuUsage(host, user, password);
         if (cpu > seuilleCPU) {
             String cpuMsg = "Surcharge CPU (" + Math.round(cpu) + "%)";
@@ -226,7 +229,7 @@ public class SshServiceInterfaceImpl implements SshServiceInterface {
             }
         }
 
-        // === ALERTE RAM ===
+        // ALERTE RAM
         double ram = getRemoteRamUsage(host, user, password);
         if (ram > seuilleRam) {
             String ramMsg = "Surcharge RAM (" + Math.round(ram) + "%)";
@@ -249,7 +252,7 @@ public class SshServiceInterfaceImpl implements SshServiceInterface {
             }
         }
 
-        // === ALERTE DISQUE ===
+        // ALERTE DISQUE
         double disk = getRemoteStorageStatus(host, user, password);
         if (disk > seuilleDisque) {
             String diskMsg = "Espace disque critique (" + Math.round(disk) + "% utilisé)";
@@ -272,7 +275,7 @@ public class SshServiceInterfaceImpl implements SshServiceInterface {
             }
         }
 
-        // === ALERTE RÉSEAU ===
+        // ALERTE RÉSEAU
         Map<String, Long> netStats = getNetworkStats(host, user, password);
         long rx = netStats.getOrDefault("bytesRecv", 0L);
         long tx = netStats.getOrDefault("bytesSent", 0L);
@@ -303,7 +306,7 @@ public class SshServiceInterfaceImpl implements SshServiceInterface {
             }
         }
 
-        // === NOTIFICATION MAIL ===
+        // Notification par mail si seuil dépassé
         List<Notification> notifications = notificationRepository.findByUtilisateurIdUtilisateur(idUser);
         int sizeOfAlerts = notifications.size();
         if (sizeOfAlerts >= seuilleMailing) {
@@ -322,7 +325,6 @@ public class SshServiceInterfaceImpl implements SshServiceInterface {
                     message.toString(),
                     mailSender,
                     passwordSender
-
             );
 
             notificationRepository.deleteAll(notifications);
@@ -333,10 +335,7 @@ public class SshServiceInterfaceImpl implements SshServiceInterface {
         return notifications.isEmpty() ? "Aucune alerte déclenchée." : notifications.size() + " alertes générées.";
     }
 
-
-
-
-    // Méthode modifiée avec paramètre de précision
+    // Formatage des octets en Ko, Mo, Go
     private String formatBytes(long bytes, boolean forDisplay) {
         double kb = bytes / 1024.0;
         double mb = kb / 1024.0;
@@ -348,82 +347,30 @@ public class SshServiceInterfaceImpl implements SshServiceInterface {
         else return bytes + " octets";
     }
 
-
-    private String formatRoundedTo1DecimalGo(long bytes) {
-        double gb = bytes / 1024.0 / 1024.0 / 1024.0;
-        return String.format(Locale.US, "%.1f Go", gb);
-    }
+    // Récupérer email de l’utilisateur courant (spring security)
     public String getCurrentUserEmail() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        return authentication.getName(); // supposé être l’email
+        return authentication.getName();
     }
 
-
-    // upload pour tester les l'archivage des elements qui existe dans le VM au azure blob
-//    public String uploadFileTest(MultipartFile file, String username, String host, String password) {
-//        Session session = null;
-//        ChannelSftp sftpChannel = null;
-//
-//        // ✅ Utiliser un répertoire dans le home
-//        String remoteDirectory = "/home/" + username + "/filesToArchive";
-//
-//        try {
-//            // Connexion SSH
-//            JSch jsch = new JSch();
-//            session = jsch.getSession(username, host, 22);
-//            session.setPassword(password);
-//            session.setConfig("StrictHostKeyChecking", "no");
-//            session.connect();
-//
-//            // Ouverture du canal SFTP
-//            Channel channel = session.openChannel("sftp");
-//            channel.connect();
-//            sftpChannel = (ChannelSftp) channel;
-//
-//            // ✅ Créer le dossier s'il n'existe pas
-//            try {
-//                sftpChannel.cd(remoteDirectory);
-//            } catch (SftpException e) {
-//                sftpChannel.mkdir(remoteDirectory);
-//                sftpChannel.cd(remoteDirectory);
-//            }
-//
-//            // ✅ Transfert du fichier
-//            InputStream fileInputStream = file.getInputStream();
-//            sftpChannel.put(fileInputStream, file.getOriginalFilename());
-//
-//            return "✅ Fichier transféré avec succès vers " + remoteDirectory;
-//        } catch (Exception e) {
-//            e.printStackTrace();
-//            return "❌ Échec du transfert : " + e.getMessage();
-//        } finally {
-//            if (sftpChannel != null) sftpChannel.exit();
-//            if (session != null) session.disconnect();
-//        }
-//    }
-
-    // l'upload du la VM vers azure Blob storage
+    // Upload SFTP vers VM distante
     public String uploadFileTest(MultipartFile file, String username, String host, String password) {
         Session session = null;
         ChannelSftp sftpChannel = null;
 
-        // Répertoire distant (exemple : /home/username/filesToArchive)
         String remoteDirectory = "/home/" + username + "/filesToArchive";
 
         try {
-            // Connexion SSH
             JSch jsch = new JSch();
             session = jsch.getSession(username, host, 22);
             session.setPassword(password);
             session.setConfig("StrictHostKeyChecking", "no");
             session.connect();
 
-            // Canal SFTP
             Channel channel = session.openChannel("sftp");
             channel.connect();
             sftpChannel = (ChannelSftp) channel;
 
-            // Créer le dossier distant s’il n’existe pas
             try {
                 sftpChannel.cd(remoteDirectory);
             } catch (SftpException e) {
@@ -431,15 +378,14 @@ public class SshServiceInterfaceImpl implements SshServiceInterface {
                 sftpChannel.cd(remoteDirectory);
             }
 
-            // Transfert du fichier (nom du fichier conservé tel quel)
             try (InputStream fileInputStream = file.getInputStream()) {
                 sftpChannel.put(fileInputStream, file.getOriginalFilename());
             }
-            // maybe add here the delete elements if uploaded wiht success
+
             return "Upload réussi du fichier : " + file.getOriginalFilename();
 
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("Erreur upload SFTP", e);
             return "Erreur lors de l’upload via SFTP : " + e.getMessage();
         } finally {
             if (sftpChannel != null && sftpChannel.isConnected()) {
@@ -451,7 +397,172 @@ public class SshServiceInterfaceImpl implements SshServiceInterface {
             }
         }
     }
+    public boolean testerConnexionServeur(Serveur serveur) {
+        Session session = null;
+        try {
+            String passwordDechiffré = EncryptionUtils.decrypt(serveur.getPassword());
+            JSch jsch = new JSch();
+            session = jsch.getSession(serveur.getUser(), serveur.getHost(), 22);
+            session.setPassword(passwordDechiffré);
 
+            Properties config = new Properties();
+            config.put("StrictHostKeyChecking", "no");
+            session.setConfig(config);
+            session.connect(5000); // timeout de 5 secondes
+
+            return session.isConnected();
+
+        } catch (Exception e) {
+            log.error("Impossible de se connecter au serveur SSH : " + serveur.getHost(), e);
+            return false;
+        } finally {
+            if (session != null && session.isConnected()) {
+                session.disconnect();
+            }
+        }
+    }
+
+    public void testerEtatServeurEtMettreAJour(Serveur serveur) {
+        boolean estConnecté = testerConnexionServeur(serveur);
+        serveur.setState(estConnecté); // true = fonctionne, false = ne fonctionne pas
+        serveurRepository.save(serveur); // Mise à jour en base
+    }
+
+
+    @Scheduled(fixedRate = 30000) // toutes les 5 minutes (300 000 ms)
+    public void verifierEtatsServeursTousUtilisateurs() {
+        List<Utilisateur> utilisateurs = utilisateurRepository.findAll();
+
+        for (Utilisateur utilisateur : utilisateurs) {
+            List<Serveur> serveurs = serveurRepository.findAllByUtilisateurIdUtilisateur(utilisateur.getIdUtilisateur());
+
+            for (Serveur serveur : serveurs) {
+                testerEtatServeurEtMettreAJour(serveur);
+            }
+        }
+
+        log.info("Vérification automatique des états de tous les serveurs terminée.");
+    }
+
+
+    // ici partie de serveur si il est windows
+    public double getWindowsCpuUsage(String host, String user, String password) {
+        String command = "wmic cpu get loadpercentage";
+        String output = executeCommand(host, user, password, command);
+
+        try (Scanner scanner = new Scanner(output)) {
+            while (scanner.hasNextLine()) {
+                String line = scanner.nextLine().trim();
+                if (line.matches("\\d+")) {
+                    return Double.parseDouble(line);
+                }
+            }
+        } catch (Exception e) {
+            log.error("Erreur lecture CPU Windows : " + output, e);
+        }
+        return -1;
+    }
+
+
+    public double getWindowsRamUsage(String host, String user, String password) {
+        String command = "wmic OS get FreePhysicalMemory,TotalVisibleMemorySize /Value";
+        String output = executeCommand(host, user, password, command);
+
+        try {
+            long total = 0, free = 0;
+            for (String line : output.split("\n")) {
+                if (line.contains("TotalVisibleMemorySize"))
+                    total = Long.parseLong(line.split("=")[1].trim());
+                if (line.contains("FreePhysicalMemory"))
+                    free = Long.parseLong(line.split("=")[1].trim());
+            }
+            return total == 0 ? -1 : (1.0 - ((double) free / total)) * 100.0;
+        } catch (Exception e) {
+            log.error("Erreur lecture RAM Windows : " + output, e);
+            return -1;
+        }
+    }
+
+    public double getWindowsStorageUsage(String host, String user, String password) {
+        String command = "wmic logicaldisk where DriveType=3 get Size,FreeSpace";
+        String output = executeCommand(host, user, password, command);
+
+        try {
+            long total = 0, free = 0;
+            for (String line : output.split("\n")) {
+                String[] parts = line.trim().split("\\s+");
+                if (parts.length == 2 && parts[0].matches("\\d+")) {
+                    free += Long.parseLong(parts[0]);
+                    total += Long.parseLong(parts[1]);
+                }
+            }
+            return total == 0 ? -1 : ((double) (total - free) / total) * 100.0;
+        } catch (Exception e) {
+            log.error("Erreur lecture disque Windows : " + output, e);
+            return -1;
+        }
+    }
+
+    public Map<String, Long> getWindowsNetworkStats(String host, String user, String password) {
+        String command = "netstat -e";
+        String output = executeCommand(host, user, password, command);
+
+        long bytesReceived = 0;
+        long bytesSent = 0;
+
+        try (Scanner scanner = new Scanner(output)) {
+            while (scanner.hasNextLine()) {
+                String line = scanner.nextLine().trim();
+                if (line.toLowerCase().startsWith("bytes")) {
+                    String[] parts = line.split("\\s+");
+                    if (parts.length >= 3) {
+                        bytesReceived = Long.parseLong(parts[1]);
+                        bytesSent = Long.parseLong(parts[2]);
+                        break;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("Erreur lecture réseau Windows : " + output, e);
+        }
+
+        Map<String, Long> map = new HashMap<>();
+        map.put("bytesRecv", bytesReceived);
+        map.put("bytesSent", bytesSent);
+        return map;
+    }
+
+
+    // ici des fonctions pour utiliser dans le controller par OS
+    public double getCpuUsageByOS(Serveur serveur) {
+        log.info("getCpuUsageByOS - Serveur: " + serveur.getHost() + ", osType: " + serveur.getOsType());
+        if ("windows".equalsIgnoreCase(serveur.getOsType())) {
+            log.info("Exécution getWindowsCpuUsage");
+            return getWindowsCpuUsage(serveur.getHost(), serveur.getUser(), serveur.getPassword());
+        } else {
+            log.info("Exécution getCpuUsage Unix");
+            return getCpuUsage(serveur.getHost(), serveur.getUser(), serveur.getPassword());
+        }
+    }
+
+
+    public double getRamUsageByOS(Serveur serveur) {
+        return serveur.getOsType().equalsIgnoreCase("windows")
+                ? getWindowsRamUsage(serveur.getHost(), serveur.getUser(), serveur.getPassword())
+                : getRemoteRamUsage(serveur.getHost(), serveur.getUser(), serveur.getPassword());
+    }
+
+    public double getStorageUsageByOS(Serveur serveur) {
+        return serveur.getOsType().equalsIgnoreCase("windows")
+                ? getWindowsStorageUsage(serveur.getHost(), serveur.getUser(), serveur.getPassword())
+                : getRemoteStorageStatus(serveur.getHost(), serveur.getUser(), serveur.getPassword());
+    }
+
+    public Map<String, Long> getNetworkStatsByOS(Serveur serveur) {
+        return serveur.getOsType().equalsIgnoreCase("windows")
+                ? getWindowsNetworkStats(serveur.getHost(), serveur.getUser(), serveur.getPassword())
+                : getNetworkStats(serveur.getHost(), serveur.getUser(), serveur.getPassword());
+    }
 
 
 

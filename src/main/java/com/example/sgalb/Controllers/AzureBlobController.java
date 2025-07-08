@@ -170,13 +170,17 @@ public class AzureBlobController {
     public ResponseEntity<Boolean> seuillesMetriquesServeurBlobStorage(@RequestParam Long idUtilisateur) {
         AzureStorageConfig azureStorageConfig = azureStorageConfigRepository.findByUtilisateurIdUtilisateur(idUtilisateur);
         SeuillesAlerting seuillesAlerting = seuillesAlertingRepository.findByUtilisateurIdUtilisateur(idUtilisateur);
-        Serveur serveur = serveurRepository.findByUtilisateurIdUtilisateur(idUtilisateur);
 
-        if (azureStorageConfig == null || seuillesAlerting == null || serveur == null) {
+        // ✅ Nouvelle vérification : serveur connecté
+        List<Serveur> serveursConnectes = serveurRepository.findAllByUtilisateurIdUtilisateur(idUtilisateur);
+
+        if (azureStorageConfig == null || seuillesAlerting == null || serveursConnectes.isEmpty()) {
             return ResponseEntity.ok(false);
         }
+
         return ResponseEntity.ok(true);
     }
+
     // lister des fichiers a archiver
     @GetMapping("/filesToArchive")
     public ResponseEntity<List<String>> listFilesToArchive(@RequestParam Long idUtilisateur) {
@@ -239,3 +243,6 @@ public class AzureBlobController {
     }
 
 }
+
+// some real data
+//192.168.43.108

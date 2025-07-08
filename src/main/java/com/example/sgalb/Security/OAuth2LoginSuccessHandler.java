@@ -29,7 +29,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
     private final GoogleAuthenticationServiceInterface googleService;
     private final MicrosoftAuthenticationServiceInterface microsoftService;
 
-    private static final String FRONTEND_URL = "http://localhost:5173";
+    private static final String FRONTEND_URL = "http://localhost:5173";// this elements is to change too
 
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response, Authentication authentication)

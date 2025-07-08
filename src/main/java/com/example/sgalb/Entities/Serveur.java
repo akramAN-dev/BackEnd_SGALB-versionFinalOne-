@@ -14,10 +14,11 @@ public class Serveur {
     private String host;
     private String user;
     private String password;
-
+    private boolean connected;
+    private boolean state;
+    private String osType;
     @ManyToOne
     @JoinColumn(name = "id_utilisateur")
     @JsonBackReference
     private Utilisateur utilisateur;
-
 }

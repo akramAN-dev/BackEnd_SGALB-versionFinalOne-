@@ -19,25 +19,22 @@ import java.util.Map;
 @AllArgsConstructor
 public class SshController {
 
-    SshServiceInterfaceImpl sshService;
-    ServeurRepository serveurRepository;
-    SeuillesAlertingServiceInterface seuillesAlertingServiceInterface;
+    private final SshServiceInterfaceImpl sshService;
+    private final ServeurRepository serveurRepository;
+    private final SeuillesAlertingServiceInterface seuillesAlertingServiceInterface;
 
-    // Méthode utilitaire pour charger les infos SSH du serveur
-//    private Serveur getServeurByUtilisateur(Long idUtilisateur) {
-//        return serveurRepository.findByUtilisateurIdUtilisateur(idUtilisateur).stream()
-//                .findFirst()
-//                .orElseThrow(() -> new RuntimeException("Aucun serveur trouvé pour cet utilisateur"));
-//    }
-
+    // 🔁 Utilise le serveur connecté pour l'utilisateur
     private Serveur getServeurByUtilisateur(Long idUtilisateur) {
-        return serveurRepository.findByUtilisateurIdUtilisateur(idUtilisateur);
+        return serveurRepository.findAllByUtilisateurIdUtilisateurAndConnectedTrue(idUtilisateur)
+                .stream()
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("Aucun serveur connecté trouvé pour cet utilisateur"));
     }
 
     @GetMapping("/cpu")
     public Map<String, Object> getCpuMetrics(@RequestParam Long idUtilisateur) {
         Serveur serveur = getServeurByUtilisateur(idUtilisateur);
-        double cpuUsage = sshService.getCpuUsage(serveur.getHost(), serveur.getUser(), serveur.getPassword());
+        double cpuUsage = sshService.getCpuUsageByOS(serveur);
 
         Map<String, Object> response = new HashMap<>();
         response.put("usage", cpuUsage);
@@ -48,47 +45,68 @@ public class SshController {
     @GetMapping("/ram")
     public double getRamMetrics(@RequestParam Long idUtilisateur) {
         Serveur serveur = getServeurByUtilisateur(idUtilisateur);
-        return sshService.getRemoteRamUsage(serveur.getHost(), serveur.getUser(), serveur.getPassword());
+        return sshService.getRamUsageByOS(serveur);
     }
 
     @GetMapping("/network")
     public Map<String, Long> getNetworkMetrics(@RequestParam Long idUtilisateur) {
         Serveur serveur = getServeurByUtilisateur(idUtilisateur);
-        return sshService.getNetworkStats(serveur.getHost(), serveur.getUser(), serveur.getPassword());
+        return sshService.getNetworkStatsByOS(serveur);
     }
 
     @GetMapping("/storage")
     public double getStorageMetrics(@RequestParam Long idUtilisateur) {
         Serveur serveur = getServeurByUtilisateur(idUtilisateur);
-        return sshService.getRemoteStorageStatus(serveur.getHost(), serveur.getUser(), serveur.getPassword());
+        return sshService.getStorageUsageByOS(serveur);
     }
 
     @GetMapping("/checkMetrics")
     public String checkMetricsAndGenerateAlert(@RequestParam Long idUtilisateur) {
+        Serveur serveur = getServeurByUtilisateur(idUtilisateur);
+        SeuillesAlerting seuils = seuillesAlertingServiceInterface.getTheMetriquesOfUSerConnected(idUtilisateur);
 
-        Serveur serveur = getServeurByUtilisateur(idUtilisateur);
-        SeuillesAlerting seuillesAlerting = seuillesAlertingServiceInterface.getTheMetriquesOfUSerConnected(idUtilisateur);
-        return sshService.MetriqueStatusAlerting(serveur.getHost(),
-                                                serveur.getUser(), serveur.getPassword(),
-                                                idUtilisateur,
-                                                seuillesAlerting.getSeuilleCPU(),
-                                                seuillesAlerting.getSeuilleRam(),
-                                                seuillesAlerting.getSeuilleDisque(),
-                                                seuillesAlerting.getSeuilleNetworkReceved(),
-                                                seuillesAlerting.getSeuilleNetworkSent(),
-                                                seuillesAlerting.getSeuilleToReceveMail(),
-                                                seuillesAlerting.getMailSender(),
-                                                seuillesAlerting.getPasswordMailSender());
+        // 🔁 Appelle toujours la méthode centrale (tu peux la refactorer plus tard pour qu'elle utilise aussi ...ByOS)
+        return sshService.MetriqueStatusAlerting(
+                serveur.getHost(), serveur.getUser(), serveur.getPassword(),
+                idUtilisateur,
+                seuils.getSeuilleCPU(),
+                seuils.getSeuilleRam(),
+                seuils.getSeuilleDisque(),
+                seuils.getSeuilleNetworkReceved(),
+                seuils.getSeuilleNetworkSent(),
+                seuils.getSeuilleToReceveMail(),
+                seuils.getMailSender(),
+                seuils.getPasswordMailSender()
+        );
     }
-    // controller pour uploader  les fichiers dans la VM only for testing the use of archive things
+
     @PostMapping("/uploadFileForTest")
-    public ResponseEntity<String> uploadFile(@RequestParam Long idUtilisateur ,@RequestParam("file") MultipartFile file) {
+    public ResponseEntity<String> uploadFile(@RequestParam Long idUtilisateur, @RequestParam("file") MultipartFile file) {
         Serveur serveur = getServeurByUtilisateur(idUtilisateur);
-        String result = sshService.uploadFileTest(file,serveur.getUser(),serveur.getHost(),serveur.getPassword());
-        if (result.startsWith("✅")) {
+        String result = sshService.uploadFileTest(file, serveur.getUser(), serveur.getHost(), serveur.getPassword());
+        if (result.startsWith("✅") || result.toLowerCase().contains("réussi")) {
             return ResponseEntity.ok(result);
         } else {
             return ResponseEntity.status(500).body(result);
         }
+    }
+
+    // ✅ Monitoring global de tous les serveurs existants (admin)
+    @GetMapping("/global-monitoring")
+    public ResponseEntity<Map<String, Map<String, Object>>> monitorAllServeurs() {
+        Map<String, Map<String, Object>> result = new HashMap<>();
+        for (Serveur serveur : serveurRepository.findAll()) {
+            try {
+                Map<String, Object> metrics = new HashMap<>();
+                metrics.put("cpu", sshService.getCpuUsageByOS(serveur));
+                metrics.put("ram", sshService.getRamUsageByOS(serveur));
+                metrics.put("storage", sshService.getStorageUsageByOS(serveur));
+                metrics.put("network", sshService.getNetworkStatsByOS(serveur));
+                result.put(serveur.getHost(), metrics);
+            } catch (Exception e) {
+                result.put(serveur.getHost(), Map.of("error", e.getMessage()));
+            }
+        }
+        return ResponseEntity.ok(result);
     }
 }
