@@ -62,6 +62,17 @@ public ResponseEntity<Serveur> getServeurByHostAndUsername(
             .orElseGet(() -> new ResponseEntity<>(HttpStatus.NOT_FOUND));
 }
 
+    @GetMapping("/getConnectedServer")
+    public ResponseEntity<Serveur> getConnectedServerByUtilisateur(@RequestParam Long idUtilisateur) {
+        List<Serveur> serveurs = serveurRepository.findAllByUtilisateurIdUtilisateurAndConnectedTrue(idUtilisateur);
+
+        if (serveurs.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+
+        // Si plusieurs serveurs sont connectés, on retourne le premier (ou adapte selon besoin)
+        return ResponseEntity.ok(serveurs.get(0));
+    }
 
     @GetMapping("/getServeursByUtilisateur")
     public ResponseEntity<List<Serveur>> getServeursByUtilisateur(@RequestParam Long idUtilisateur) {
